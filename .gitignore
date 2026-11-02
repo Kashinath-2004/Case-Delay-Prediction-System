@@ -23,16 +23,13 @@ wheels/
 .installed.cfg
 *.egg
 
-# Data & Large Archives
+# Data & Large Raw Archives
 *.tar.gz
 *.dta
 *.parquet
-*.csv.gz
-data/raw/
-data/processed/
-models/
-justice_data/
-hybridpendencyprediction-main/justice_data/
+not/justice_data/
+not/data_archives/
+*judge_case_merge_key.csv
 *.zip
 
 # Frontend
