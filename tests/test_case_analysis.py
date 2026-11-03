@@ -22,6 +22,7 @@ from src.legal_knowledge.bail_rules import get_bail_assessment
 from src.legal_knowledge.ipc_bns_mapper import bns_to_ipc, get_concordance_entry, ipc_to_bns
 from src.retrieval.similar_cases import retrieve_similar_cases
 from api.main import analyze_case, extract_case_from_text, get_sample_cases
+from api.predictor import PredictorService
 from api.schemas import CaseAnalysisRequest, TextExtractRequest
 
 
@@ -87,6 +88,36 @@ class TestBailabilityRules(unittest.TestCase):
         assessment = get_bail_assessment(["303(2)"], act="Bharatiya Nyaya Sanhita, 2023")
         self.assertTrue(assessment.overall_bailable)
         self.assertIn("Section 478 BNSS", [p["section"] for p in assessment.statutory_provisions])
+
+
+class TestFallbackPredictionBailability(unittest.TestCase):
+    """Manual API bailability codes must agree with fallback explanations."""
+
+    def setUp(self):
+        self.predictor = object.__new__(PredictorService)
+        self.predictor.classifier = None
+
+    def test_numeric_zero_is_non_bailable(self):
+        result = self.predictor.predict({"section_s": "379", "bailable_ipc": 0})
+
+        self.assertEqual(result["predicted_class"], "delayed")
+        self.assertFalse(result["uncertainty"]["calibrated"])
+        self.assertIn("not a statistically calibrated", result["uncertainty"]["notice"])
+        bail_driver = next(
+            driver for driver in result["top_features"]
+            if driver["feature"] == "Non-Bailable Status & Custody Adjudication"
+        )
+        self.assertEqual(bail_driver["direction"], "Increases Duration")
+
+    def test_numeric_one_is_bailable(self):
+        result = self.predictor.predict({"section_s": "379", "bailable_ipc": 1})
+
+        self.assertEqual(result["predicted_class"], "ontime")
+        bail_driver = next(
+            driver for driver in result["top_features"]
+            if driver["feature"] == "Bailable Matter (Accused on Bond)"
+        )
+        self.assertEqual(bail_driver["direction"], "Reduces Duration")
 
 
 class TestPrivacyAndIngestion(unittest.TestCase):

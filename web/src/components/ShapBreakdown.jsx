@@ -1,25 +1,17 @@
 import React from 'react';
 import { ArrowUpRight, ArrowDownRight, Info } from 'lucide-react';
 
-export default function ShapBreakdown({ features = [] }) {
-  if (!features || features.length === 0) {
-    features = [
-      { feature: "Presiding Judge Tenure at Filing", impact: "+2.4 mo", direction: "increase_delay" },
-      { feature: "Bailable IPC Category (Non-Bailable)", impact: "+4.1 mo", direction: "increase_delay" },
-      { feature: "Number of IPC Sections", impact: "+1.2 mo", direction: "increase_delay" },
-      { feature: "State & District Court Backlog", impact: "-1.8 mo", direction: "decrease_delay" }
-    ];
-  }
+export default function ShapBreakdown({ features = [], modelTrained = false }) {
 
   return (
     <div className="bg-white dark:bg-navy-900 rounded-2xl border border-slate-200 dark:border-navy-800 p-6 shadow-sm transition-colors">
       <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100 dark:border-navy-800">
         <div>
           <h4 className="serif-heading text-base font-bold text-navy-950 dark:text-white">
-            Feature Attribution & Explainability (XAI)
+            Why this estimate?
           </h4>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Key factors influencing the predicted case duration (TreeSHAP estimates)
+            Plain-language factors derived from the case details; these are not SHAP values or causal effects.
           </p>
         </div>
         <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-navy-800 flex items-center justify-center text-slate-500 dark:text-slate-400">
@@ -27,7 +19,7 @@ export default function ShapBreakdown({ features = [] }) {
         </div>
       </div>
 
-      <div className="space-y-3">
+      {features.length > 0 ? <div className="space-y-3">
         {features.map((item, idx) => {
           const isIncrease = item.direction === 'increase_delay' || item.impact.startsWith('+');
           return (
@@ -55,10 +47,16 @@ export default function ShapBreakdown({ features = [] }) {
             </div>
           );
         })}
-      </div>
+      </div> : (
+        <p className="rounded-xl border border-slate-200 dark:border-navy-800 p-4 text-sm text-slate-600 dark:text-slate-300">
+          No case-specific explanation factors were returned for this estimate.
+        </p>
+      )}
 
       <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-4 italic">
-        * SHAP estimates show marginal months added to or subtracted from baseline case duration.
+        {modelTrained
+          ? 'Factors summarize relevant case inputs; they do not quantify a calibrated per-feature effect.'
+          : 'This estimate uses the research-benchmark fallback; these factors do not come from a trained local model.'}
       </p>
     </div>
   );

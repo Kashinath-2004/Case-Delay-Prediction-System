@@ -7,6 +7,7 @@ __pycache__/
 env/
 venv/
 .venv/
+.venv311/
 build/
 develop-eggs/
 dist/
@@ -35,6 +36,9 @@ not/data_archives/
 # Frontend
 web/node_modules/
 web/dist/
+
+# Local demo accounts and saved case evaluation records
+data/case_registry.sqlite3*
 
 # OS
 .DS_Store

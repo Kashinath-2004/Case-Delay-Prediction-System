@@ -3,15 +3,30 @@ import { ShieldCheck, Scale, CheckCircle2, AlertTriangle, ArrowRight, Activity }
 
 export default function Robustness() {
   const [robustnessData, setRobustnessData] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetch('/api/robustness')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data && data.perturbation_a) setRobustnessData(data);
+      .then(response => {
+        if (!response.ok) throw new Error(`Server returned HTTP ${response.status}`);
+        return response.json();
       })
-      .catch(() => {});
+      .then(data => setRobustnessData(data))
+      .catch(error => setRobustnessData({ status: 'unavailable', message: error.message }))
+      .finally(() => setLoading(false));
   }, []);
+
+  const formatTStatistic = (test) => Number.isFinite(test?.t_statistic)
+    ? `t = ${test.t_statistic.toFixed(3)}`
+    : 'Not run';
+  const formatPValue = (test) => {
+    if (!Number.isFinite(test?.p_value)) return 'Not run';
+    return test.p_value < 0.001 ? 'p < 0.001' : `p = ${test.p_value.toFixed(3)}`;
+  };
+  const formatDelta = (delta) => Number.isFinite(delta) ? `|Δt| = ${delta.toFixed(3)}` : 'Not run';
+  const auditA = robustnessData?.perturbation_a;
+  const auditB = robustnessData?.perturbation_b;
+  const hasAuditResults = Boolean(auditA || auditB);
 
   return (
     <div className="max-w-5xl mx-auto py-8 px-4 sm:px-6 space-y-12">
@@ -23,8 +38,16 @@ export default function Robustness() {
           Demographic Perturbation & Bias Auditing
         </h2>
         <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400 mt-1 max-w-3xl">
-          To ensure ethical deployment in the judicial system, the models undergo rigorous statistical perturbation testing and hypothesis testing ($t$-tests) across demographic proxies.
+          These saved sensitivity checks compare group outcome rates before and after demographic perturbations. They are descriptive audits, not proof of model fairness or legal suitability.
         </p>
+      </div>
+
+      <div role="status" className={`p-4 rounded-xl border text-sm ${hasAuditResults ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200' : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200'}`}>
+        {loading
+          ? 'Loading the latest saved audit report…'
+          : hasAuditResults
+            ? 'Showing values from the latest saved robustness run.'
+            : robustnessData?.message || 'No robustness audit report is available. Run the robustness stage to generate one.'}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -43,26 +66,26 @@ export default function Robustness() {
           </div>
 
           <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-            Reassigns missing defendant categories (codes <code className="bg-slate-100 dark:bg-navy-950 px-1.5 py-0.5 rounded text-xs">-9998</code>, <code className="bg-slate-100 dark:bg-navy-950 px-1.5 py-0.5 rounded text-xs">-9999</code>) based on the empirical male-to-female ratio, then retrains the DRF classifier.
+            Reassigns unknown demographic codes using the observed group ratio, then compares t-tests on recorded outcome rates. This stage does not retrain the classifier.
           </p>
 
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-navy-950 border border-slate-100 dark:border-navy-800 space-y-2 text-xs">
             <div className="flex justify-between font-medium">
               <span className="text-slate-500 dark:text-slate-400">Pre-Reassignment t-statistic:</span>
-              <span className="font-mono font-bold text-navy-950 dark:text-white">t = 2.414 (p &lt; 0.05)</span>
+              <span className="font-mono font-bold text-navy-950 dark:text-white">{formatTStatistic(auditA?.pre_reassignment)} ({formatPValue(auditA?.pre_reassignment)})</span>
             </div>
             <div className="flex justify-between font-medium">
               <span className="text-slate-500 dark:text-slate-400">Post-Reassignment t-statistic:</span>
-              <span className="font-mono font-bold text-navy-950 dark:text-white">t = 2.389 (p &lt; 0.05)</span>
+              <span className="font-mono font-bold text-navy-950 dark:text-white">{formatTStatistic(auditA?.post_reassignment)} ({formatPValue(auditA?.post_reassignment)})</span>
             </div>
             <div className="flex justify-between font-medium pt-2 border-t border-slate-200/60 dark:border-navy-800 text-emerald-600 dark:text-emerald-400">
-              <span>Fairness Delta (Δt):</span>
-              <span className="font-bold">0.025 (Negligible Shift)</span>
+              <span>Absolute t-statistic change:</span>
+              <span className="font-bold">{formatDelta(auditA?.delta_t_statistic)}</span>
             </div>
           </div>
 
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            <strong>Conclusion:</strong> Reassignment of missing demographics produces no divergence in model predictions, confirming that missingness is not utilized as a predictive backdoor.
+            <strong>Recorded audit status:</strong> {auditA?.fairness_status || 'Not run'}. A stable t-statistic alone does not establish fairness across model errors or calibration.
           </p>
         </div>
 
@@ -81,26 +104,26 @@ export default function Robustness() {
           </div>
 
           <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-            Randomly flips 10% of male defendants to female (<code className="bg-slate-100 dark:bg-navy-950 px-1.5 py-0.5 rounded text-xs">0 → 1</code>) to inject demographic label perturbation and evaluate feature importance sensitivity.
+            Randomly flips a configured share of records in the demographic field, then compares t-tests on recorded outcome rates. This is not a feature-importance or model-retraining test.
           </p>
 
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-navy-950 border border-slate-100 dark:border-navy-800 space-y-2 text-xs">
             <div className="flex justify-between font-medium">
               <span className="text-slate-500 dark:text-slate-400">Pre-Flip t-statistic:</span>
-              <span className="font-mono font-bold text-navy-950 dark:text-white">t = 2.414 (p &lt; 0.05)</span>
+              <span className="font-mono font-bold text-navy-950 dark:text-white">{formatTStatistic(auditB?.pre_flip)} ({formatPValue(auditB?.pre_flip)})</span>
             </div>
             <div className="flex justify-between font-medium">
               <span className="text-slate-500 dark:text-slate-400">Post-10%-Flip t-statistic:</span>
-              <span className="font-mono font-bold text-navy-950 dark:text-white">t = 2.185 (p &lt; 0.05)</span>
+              <span className="font-mono font-bold text-navy-950 dark:text-white">{formatTStatistic(auditB?.post_flip)} ({formatPValue(auditB?.post_flip)})</span>
             </div>
             <div className="flex justify-between font-medium pt-2 border-t border-slate-200/60 dark:border-navy-800 text-amber-600 dark:text-amber-400">
-              <span>Fairness Delta (Δt):</span>
-              <span className="font-bold">0.229 (Within Robust Bound)</span>
+              <span>Absolute t-statistic change:</span>
+              <span className="font-bold">{formatDelta(auditB?.delta_t_statistic)}</span>
             </div>
           </div>
 
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            <strong>Conclusion:</strong> Model feature ranking remains stable under perturbation. Top drivers remain legal offense (bailable status, IPC sections) and judge tenure, rather than defendant demographics.
+            <strong>Records flipped:</strong> {Number.isFinite(auditB?.flipped_records_count) ? auditB.flipped_records_count : 'Not run'}. <strong>Recorded audit status:</strong> {auditB?.stability_status || 'Not run'}.
           </p>
         </div>
       </div>

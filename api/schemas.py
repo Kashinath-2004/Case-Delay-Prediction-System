@@ -37,6 +37,7 @@ class PredictionResponse(BaseModel):
     routed_regressor: Optional[str] = None
     predicted_duration_months: Optional[float] = None
     duration_range_months: Optional[List[float]] = None
+    uncertainty: Optional[Dict[str, Any]] = None
     top_features: Optional[List[FeatureContribution]] = None
     source: Optional[str] = None
 
@@ -44,6 +45,24 @@ class PredictionResponse(BaseModel):
 class CodebookItem(BaseModel):
     code: int
     name: str
+
+
+class AuthRequest(BaseModel):
+    email: str
+    password: str
+
+
+class CaseRecordCreate(BaseModel):
+    case_details: Dict[str, Any]
+    forecast: Dict[str, Any]
+    prediction_mode: str = "unknown"
+
+
+class OutcomeUpdate(BaseModel):
+    actual_duration_months: float = Field(..., gt=0, le=1200)
+    actual_disposition_date: Optional[str] = None
+    actual_disposition: Optional[str] = None
+    outcome_note: Optional[str] = Field(default=None, max_length=2000)
 
 
 class ModelInfoResponse(BaseModel):

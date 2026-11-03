@@ -34,6 +34,11 @@ Justice AI features an end-to-end document analysis flow tailored for citizens a
 
 Detailed documentation in [docs/CASE_ANALYSIS.md](docs/CASE_ANALYSIS.md).
 
+### Accounts & Case Outcome Evaluation
+The web app includes local account registration/sign-in and a per-account case register. From a completed analysis, choose **Save to case register**; later, record the actual duration and disposition to compare the estimate with the observed outcome. The register reports MAE, RMSE, signed bias, on-time/delayed accuracy at the 24-month threshold, a confusion matrix, and duration errors separated by prediction mode. Metrics use only cases with entered outcomes; this convenience cohort is observational and is not a substitute for evaluation on an independent held-out research dataset.
+
+The demo stores account hashes, session tokens (hashed), structured case metadata, and outcomes in `data/case_registry.sqlite3`. Uploaded files, pasted source text, and extraction evidence are not stored. This local demo database is not encrypted at rest and the app is not production authentication; use synthetic/demo case records only. Do not expose the development server to the internet.
+
 ### 🧪 Extraction Benchmark & Unit Tests
 ```bash
 # Run ground-truth evidence extraction benchmark (100% accuracy on fixtures):
@@ -42,6 +47,13 @@ python -m src.case.eval_extraction
 # Run complete unit and integration test suite:
 python -m unittest discover -s tests -p "test_*.py"
 ```
+
+### Training Readiness Check
+Before starting model training, check the local Python/Java/H2O setup, configured training CSVs, reference results, and exported model files:
+```bash
+python check_training_readiness.py
+```
+The checker exits with status `1` when training prerequisites are missing and prints the specific files or packages needed. The classifier and regression datasets are licensed inputs and are not included in this repository; place them at the paths configured in `config.yaml` before running `python run_pipeline.py`.
 
 ---
 
@@ -171,6 +183,15 @@ python run_pipeline.py --stage robustness
 ---
 
 ### 3. Launch the Web Application
+
+#### Windows (recommended)
+From the repository folder, run this in PowerShell. The script creates the Python 3.11 environment if needed, installs dependencies, starts the API in a separate window, and runs the web frontend in the current terminal:
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\start.ps1
+```
+Open [http://localhost:3000](http://localhost:3000). Keep both terminal windows open. Python 3.11 and Node.js are required.
+The launcher installs only web/API runtime packages. For H2O model training, use the full `requirements.txt` in a separate environment; Java 8+ is also required.
 
 #### Start the FastAPI Backend:
 ```bash

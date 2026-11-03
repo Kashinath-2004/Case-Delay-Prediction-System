@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { ClipboardCopy, Download, Printer } from 'lucide-react';
 
-export default function CaseAnalysis() {
+export default function CaseAnalysis({ token }) {
   const [step, setStep] = useState(1); // 1: Ingest, 2: Review, 3: Results
   const [ingestTab, setIngestTab] = useState('upload'); // 'upload' or 'paste'
   const [file, setFile] = useState(null);
@@ -33,6 +34,9 @@ export default function CaseAnalysis() {
     raw_meta: {},
   });
   const [resultsData, setResultsData] = useState(null);
+  const [exportNotice, setExportNotice] = useState('');
+  const [recordSaved, setRecordSaved] = useState(false);
+  const [savingRecord, setSavingRecord] = useState(false);
 
   const normalizeExtractedData = (data) => {
     const getVal = (f) => (f && typeof f === 'object' && 'value' in f) ? f.value : f;
@@ -41,6 +45,7 @@ export default function CaseAnalysis() {
     return {
       case_title: getVal(data.case_title) || '',
       case_number: getVal(data.case_number) || '',
+      filing_date: getVal(data.filing_date) || '',
       state: getVal(data.state) || 'Maharashtra',
       state_code: getVal(data.state_code) || 1,
       district: getVal(data.district) || getVal(data.court_name) || '',
@@ -57,18 +62,59 @@ export default function CaseAnalysis() {
       accused_count: getVal(data.accused_count) || 1,
       case_summary: getVal(data.case_summary) || '',
       extraction_mode: data.extraction_mode || 'DETERMINISTIC_RULES',
+      warnings: Array.isArray(data.warnings) ? data.warnings : [],
       raw_meta: {
         case_title: getMeta(data.case_title),
         case_number: getMeta(data.case_number),
-        state: getMeta(data.state_code) || getMeta(data.state),
+        filing_date: getMeta(data.filing_date),
+        filing_year: getMeta(data.filing_year),
+        court_name: getMeta(data.court_name),
+        state: getMeta(data.state) || getMeta(data.state_code),
         district: getMeta(data.district) || getMeta(data.court_name),
+        act: getMeta(data.act),
         sections: getMeta(data.sections),
+        accused_names: getMeta(data.accused_names),
+        accused_count: getMeta(data.accused_count),
+        custody_status: getMeta(data.custody_status),
+        case_type: getMeta(data.case_type),
+        case_summary: getMeta(data.case_summary),
       }
     };
   };
 
+  const evidenceFields = [
+    ['Case title / parties', 'case_title'],
+    ['Case / FIR number', 'case_number'],
+    ['Filing date', 'filing_date'],
+    ['Court', 'court_name'],
+    ['State', 'state'],
+    ['District', 'district'],
+    ['Act', 'act'],
+    ['Charged sections', 'sections'],
+    ['Accused names', 'accused_names'],
+    ['Custody status', 'custody_status'],
+    ['Case type', 'case_type'],
+    ['Case summary', 'case_summary'],
+  ];
+
+  const getFieldEvidence = (meta) => {
+    if (!meta || typeof meta !== 'object') return null;
+    if (meta.evidence && typeof meta.evidence === 'object') return meta.evidence;
+    if (meta.evidence_snippet) return { snippet: meta.evidence_snippet };
+    return null;
+  };
+
+  const getEvidenceStatus = (meta, value) => {
+    if (!value) return 'Needs review';
+    if (meta?.conflict_warning) return 'Conflict to review';
+    if (meta?.is_inferred || meta?.confidence_level === 'INFERRED') return 'Inferred';
+    if (meta?.verified) return 'Verified against source';
+    if (getFieldEvidence(meta)) return 'Source quote available';
+    return 'No source quote';
+  };
+
   useEffect(() => {
-    fetch('/case/sample')
+    fetch('/api/case/sample')
       .then(res => res.json())
       .then(data => setSampleCases(data))
       .catch(err => console.warn('Sample fetch err:', err));
@@ -110,7 +156,7 @@ export default function CaseAnalysis() {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('redact_pii', redactPii);
-        const res = await fetch('/case/extract', { method: 'POST', body: formData });
+        const res = await fetch('/api/case/extract', { method: 'POST', body: formData });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           throw new Error(err.detail || 'File extraction failed');
@@ -122,7 +168,7 @@ export default function CaseAnalysis() {
           setLoading(false);
           return;
         }
-        const res = await fetch('/case/extract-text', {
+        const res = await fetch('/api/case/extract-text', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ raw_text: caseText, redact_pii: redactPii })
@@ -158,7 +204,7 @@ export default function CaseAnalysis() {
 
     setLoading(true);
     try {
-      const res = await fetch('/case/analyze', {
+      const res = await fetch('/api/case/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reviewData)
@@ -174,19 +220,96 @@ export default function CaseAnalysis() {
       setLoading(false);
     }
   };
+
+  const downloadReport = () => {
+    setExportNotice('');
+    const confirmed = window.confirm(
+      'The downloaded report includes case details and analysis. Store it securely and only share it with authorized people.'
+    );
+    if (!confirmed) return;
+
+    const report = {
+      report_title: 'Justice AI Case Analysis',
+      exported_at: new Date().toISOString(),
+      case_details: reviewData,
+      analysis: resultsData,
+    };
+    const filenameBase = (reviewData.case_number || reviewData.case_title || 'case-analysis')
+      .replace(/[^a-z0-9]+/gi, '-')
+      .replace(/^-|-$/g, '')
+      .toLowerCase() || 'case-analysis';
+    const objectUrl = URL.createObjectURL(
+      new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })
+    );
+    const downloadLink = document.createElement('a');
+    downloadLink.href = objectUrl;
+    downloadLink.download = `${filenameBase}-report.json`;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  };
+
+  const copySummary = async () => {
+    const prediction = resultsData.duration_prediction;
+    const summary = [
+      'Justice AI | Case Analysis Summary',
+      `Case: ${resultsData.glance.case_title || 'Not provided'}`,
+      `Case number: ${resultsData.glance.case_number || 'Not provided'}`,
+      `Venue: ${resultsData.glance.district}, ${resultsData.glance.state}`,
+      `Sections: ${(resultsData.glance.sections || []).join(', ') || 'Not provided'}`,
+      `Estimated duration: ${prediction.expected_duration_months.toFixed(1)} months (range ${prediction.duration_range_months[0].toFixed(1)}-${prediction.duration_range_months[1].toFixed(1)} months)`,
+      `Delay risk: ${prediction.delay_risk_pct.toFixed(1)}%`,
+      `Bail classification: ${resultsData.bail_assessment.status_label}`,
+      'This is an informational estimate, not legal advice.',
+    ].join('\n');
+
+    try {
+      await navigator.clipboard.writeText(summary);
+      setExportNotice('Summary copied to clipboard.');
+    } catch {
+      setExportNotice('Clipboard access is unavailable in this browser.');
+    }
+  };
+
+  const saveCaseRecord = async () => {
+    setSavingRecord(true);
+    setExportNotice('');
+    try {
+      const response = await fetch('/api/cases', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reviewData)
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          case_details: {
+            case_title: resultsData.glance.case_title,
+            case_number: resultsData.glance.case_number,
+            state: resultsData.glance.state,
+            district: resultsData.glance.district,
+            sections: resultsData.glance.sections,
+            filing_date: reviewData.filing_date || null,
+            case_type: reviewData.case_type,
+          },
+          forecast: {
+            expected_duration_months: resultsData.duration_prediction.expected_duration_months,
+            duration_range_months: resultsData.duration_prediction.duration_range_months,
+            predicted_class: resultsData.duration_prediction.predicted_class,
+            delay_risk_pct: resultsData.duration_prediction.delay_risk_pct,
+            source: resultsData.duration_prediction.source,
+          },
+          prediction_mode: resultsData.duration_prediction.model_trained ? 'trained_local_model' : 'research_benchmark_fallback',
+        }),
       });
-      if (!res.ok) throw new Error('Analysis failed');
-      const data = await res.json();
-      setResultsData(data);
-      setStep(3);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch (err) {
-      alert('Analysis error: ' + err.message);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Could not save this case record.');
+      setRecordSaved(true);
+      setExportNotice('Saved to your case register. Source text and evidence quotes were not saved.');
+    } catch (requestError) {
+      setExportNotice(requestError.message || 'Could not save this case record.');
     } finally {
-      setLoading(false);
+      setSavingRecord(false);
     }
   };
 
@@ -388,6 +511,67 @@ export default function CaseAnalysis() {
               <span className="px-3 py-1 rounded-full text-[10px] font-bold bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-100">AUDITED EVIDENCE</span>
             </div>
           )}
+
+          <section aria-labelledby="extraction-evidence-heading" className="space-y-4 rounded-2xl border border-slate-200 dark:border-navy-800 bg-slate-50/70 dark:bg-navy-950/60 p-4 sm:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h4 id="extraction-evidence-heading" className="font-bold text-sm text-navy-950 dark:text-white">Extraction evidence</h4>
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">Review source support before continuing. Quotes reflect the text received by the extractor, including any enabled redaction.</p>
+              </div>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">{reviewData.extraction_mode === 'DEMO_SAMPLE' ? 'Demo fixture' : reviewData.extraction_mode || 'Extraction'}</span>
+            </div>
+
+            {reviewData.extraction_mode === 'DEMO_SAMPLE' ? (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                This preconfigured sample does not include field-level extraction provenance. Confirm the displayed case details manually.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {evidenceFields.map(([label, key]) => {
+                  const meta = reviewData.raw_meta?.[key];
+                  const evidence = getFieldEvidence(meta);
+                  const value = reviewData[key];
+                  const hasValue = Array.isArray(value) ? value.length > 0 : Boolean(value);
+                  const displayValue = Array.isArray(value) ? value.join(', ') : value;
+                  const status = getEvidenceStatus(meta, hasValue ? displayValue : '');
+
+                  return (
+                    <article key={key} className="min-w-0 rounded-xl border border-slate-200 dark:border-navy-800 bg-white dark:bg-navy-900 p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <h5 className="text-xs font-semibold text-slate-800 dark:text-slate-200">{label}</h5>
+                          <p className="mt-1 text-xs text-navy-950 dark:text-white break-words">{hasValue ? displayValue : 'No value extracted'}</p>
+                        </div>
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${status === 'Verified against source' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : status === 'Needs review' || status === 'Conflict to review' ? 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200' : 'bg-slate-100 text-slate-700 dark:bg-navy-800 dark:text-slate-300'}`}>
+                          {status}
+                        </span>
+                      </div>
+                      {evidence?.snippet && (
+                        <blockquote className="mt-2 border-l-2 border-gold-500 pl-2 text-[11px] leading-relaxed text-slate-600 dark:text-slate-400 break-words">
+                          “{evidence.snippet}”
+                          <span className="mt-1 block text-[10px] text-slate-400">
+                            {[evidence.page_num && `Page ${evidence.page_num}`, evidence.line_num && `Line ${evidence.line_num}`, evidence.method].filter(Boolean).join(' · ')}
+                          </span>
+                        </blockquote>
+                      )}
+                      {Number.isFinite(meta?.confidence) && (
+                        <p className="mt-2 text-[10px] text-slate-500 dark:text-slate-400">Extraction confidence: {Math.round(meta.confidence * 100)}%</p>
+                      )}
+                      {meta?.conflict_warning && (
+                        <p className="mt-2 text-[11px] text-amber-800 dark:text-amber-300">{meta.conflict_warning}</p>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+
+            {Array.isArray(reviewData.warnings) && reviewData.warnings.length > 0 && (
+              <ul className="space-y-1 border-t border-slate-200 dark:border-navy-800 pt-3 text-xs text-amber-800 dark:text-amber-300">
+                {reviewData.warnings.map((warning, index) => <li key={`${index}-${warning}`}>{warning}</li>)}
+              </ul>
+            )}
+          </section>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             <div>
@@ -593,15 +777,30 @@ export default function CaseAnalysis() {
 
       {/* STEP 3: RESULTS (7 SECTIONS) */}
       {step === 3 && resultsData && (
-        <div className="space-y-8 max-w-5xl mx-auto">
-          <div className="flex items-center justify-between border-b border-slate-200 dark:border-navy-800 pb-3">
+        <div className="case-report space-y-8 max-w-5xl mx-auto">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 dark:border-navy-800 pb-3">
             <div>
               <span className="text-xs font-bold uppercase tracking-wider text-gold-600 dark:text-gold-400">Analysis Completed</span>
               <h2 className="serif-heading text-2xl sm:text-3xl font-bold text-navy-950 dark:text-white mt-1">Complete Case Intelligence Report</h2>
             </div>
-            <button onClick={() => setStep(2)} className="px-4 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-navy-700 hover:bg-slate-100 dark:hover:bg-navy-800 transition">
-              ✏️ Edit Parameters
-            </button>
+            <div className="report-actions flex flex-wrap items-center gap-2" data-print-hide="true">
+              <button onClick={saveCaseRecord} disabled={savingRecord || recordSaved} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-60 transition" title="Save structured case details and forecast for later outcome evaluation">
+                {recordSaved ? 'Saved to register' : savingRecord ? 'Saving…' : 'Save to case register'}
+              </button>
+              <button onClick={() => window.print()} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border border-slate-300 dark:border-navy-700 hover:bg-slate-100 dark:hover:bg-navy-800 transition" title="Print or save this report as PDF">
+                <Printer className="w-4 h-4" /> Print / Save PDF
+              </button>
+              <button onClick={copySummary} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border border-slate-300 dark:border-navy-700 hover:bg-slate-100 dark:hover:bg-navy-800 transition" title="Copy a concise case summary">
+                <ClipboardCopy className="w-4 h-4" /> Copy Summary
+              </button>
+              <button onClick={downloadReport} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-navy-900 text-white dark:bg-gold-500 dark:text-navy-950 hover:opacity-90 transition" title="Download a JSON copy of this report">
+                <Download className="w-4 h-4" /> Download JSON
+              </button>
+              <button onClick={() => setStep(2)} className="px-3 py-2 rounded-lg text-xs font-semibold border border-slate-300 dark:border-navy-700 hover:bg-slate-100 dark:hover:bg-navy-800 transition">
+                Edit Parameters
+              </button>
+              {exportNotice && <span className="w-full text-right text-xs text-slate-600 dark:text-slate-300" role="status">{exportNotice}</span>}
+            </div>
           </div>
 
           {/* Section 1: Glance */}
@@ -658,8 +857,13 @@ export default function CaseAnalysis() {
                   {resultsData.duration_prediction.expected_duration_months.toFixed(1)} <span className="text-base font-medium text-slate-500">months</span>
                 </div>
                 <div className="text-xs text-slate-500 pt-1">
-                  Estimated Range: <strong>{resultsData.duration_prediction.duration_range_months[0].toFixed(1)} – {resultsData.duration_prediction.duration_range_months[1].toFixed(1)} months</strong>
+                  Estimated Range (uncalibrated): <strong>{resultsData.duration_prediction.duration_range_months[0].toFixed(1)} – {resultsData.duration_prediction.duration_range_months[1].toFixed(1)} months</strong>
                 </div>
+                {resultsData.duration_prediction.uncertainty?.notice && (
+                  <p className="pt-1 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400" role="note">
+                    {resultsData.duration_prediction.uncertainty.notice}
+                  </p>
+                )}
               </div>
 
               <div className="p-6 rounded-2xl bg-slate-50 dark:bg-navy-950 border border-slate-200 dark:border-navy-800 space-y-3">

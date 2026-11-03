@@ -1,10 +1,11 @@
 import React from 'react';
-import { Scale, Activity, Cpu, Award, ShieldCheck, Sun, Moon } from 'lucide-react';
+import { Scale, Activity, Cpu, Award, ShieldCheck, Sun, Moon, ClipboardList, LogOut } from 'lucide-react';
 
-export default function Navbar({ activePage, setActivePage, darkMode, setDarkMode }) {
+export default function Navbar({ activePage, setActivePage, darkMode, setDarkMode, user, onSignOut }) {
   const navItems = [
     { id: 'home', label: 'Home', icon: Scale },
     { id: 'analyze', label: 'Case Analysis', icon: Activity },
+    { id: 'cases', label: 'Case Register', icon: ClipboardList },
     { id: 'predict', label: 'Manual Predict', icon: Cpu },
     { id: 'how-it-works', label: 'How It Works', icon: Cpu },
     { id: 'results', label: 'Benchmarks', icon: Award },
@@ -57,6 +58,15 @@ export default function Navbar({ activePage, setActivePage, darkMode, setDarkMod
 
           {/* Dark mode toggle */}
           <div className="flex items-center space-x-2">
+            <span className="hidden xl:inline max-w-36 truncate text-xs text-slate-500 dark:text-slate-400" title={user?.email}>{user?.email}</span>
+            <button
+              onClick={onSignOut}
+              className="p-2 rounded-lg text-slate-500 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-navy-800 transition-colors"
+              title="Sign out"
+              aria-label="Sign out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
             <button
               onClick={() => setDarkMode(!darkMode)}
               className="p-2 rounded-lg text-slate-500 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-navy-800 transition-colors"

@@ -65,6 +65,7 @@ export default function Predict() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setResult(null);
 
     try {
       const resp = await fetch('/api/predict', {
@@ -76,35 +77,12 @@ export default function Predict() {
         throw new Error(`Server returned HTTP ${resp.status}`);
       }
       const data = await resp.json();
+      if (data.status === 'error') {
+        throw new Error(data.message || 'The prediction service could not complete this request.');
+      }
       setResult(data);
     } catch (err) {
-      // Fallback for demo when backend is offline or model still training
-      setTimeout(() => {
-        const isBailable = formData.bailable_ipc === 1;
-        const baseDuration = isBailable ? 14.8 : 38.4;
-        const tenureEffect = formData.filing_judge_tenure_months > 12 ? 3.2 : -2.1;
-        const dur = Math.max(2.0, baseDuration + tenureEffect);
-        const ontime = dur <= 24.0;
-
-        setResult({
-          status: "success",
-          model_trained: true,
-          predicted_class: ontime ? "ontime" : "delayed",
-          delay_risk_pct: ontime ? 28.5 : 82.4,
-          ontime_confidence_pct: ontime ? 71.5 : 17.6,
-          routed_regressor: ontime ? "Model 2a (On-Time Specialist)" : "Model 2b (Delayed Specialist)",
-          predicted_duration_months: parseFloat(dur.toFixed(1)),
-          duration_range_months: [Math.max(1.0, parseFloat((dur - 4.5).toFixed(1))), parseFloat((dur + 5.0).toFixed(1))],
-          top_features: [
-            { feature: "Bailable IPC Offense", impact: isBailable ? "-4.2 mo" : "+6.5 mo", direction: isBailable ? "decrease_delay" : "increase_delay" },
-            { feature: "Presiding Judge Tenure", impact: tenureEffect > 0 ? "+3.2 mo" : "-2.1 mo", direction: tenureEffect > 0 ? "increase_delay" : "decrease_delay" },
-            { feature: "IPC Sections Count", impact: "+1.8 mo", direction: "increase_delay" },
-            { feature: "Jurisdiction Average Backlog", impact: "+2.1 mo", direction: "increase_delay" }
-          ]
-        });
-        setLoading(false);
-      }, 500);
-      return;
+      setError(err.message || 'The prediction service is unavailable.');
     }
     setLoading(false);
   };
@@ -253,8 +231,19 @@ export default function Predict() {
 
         {/* Results Panel */}
         <div className="lg:col-span-7 space-y-6">
-          {result ? (
+          {error ? (
+            <div role="alert" className="min-h-[280px] flex flex-col items-center justify-center p-8 rounded-3xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 text-center">
+              <AlertCircle className="w-9 h-9 text-rose-600 dark:text-rose-400 mb-3" />
+              <h4 className="serif-heading font-bold text-lg text-rose-900 dark:text-rose-200">Prediction unavailable</h4>
+              <p className="text-sm text-rose-800 dark:text-rose-300 max-w-md mt-2">{error}</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 max-w-md mt-2">Check that the API is running, then submit again. This page will not substitute a simulated prediction.</p>
+            </div>
+          ) : result ? (
             <div className="space-y-6">
+              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold ${result.model_trained ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'}`}>
+                <span className={`w-2 h-2 rounded-full ${result.model_trained ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                {result.model_trained ? 'Trained local model' : 'Research-benchmark fallback · local models not trained'}
+              </div>
               {/* Top Banner: Duration Forecast */}
               <div className="p-6 sm:p-8 rounded-3xl bg-gradient-to-br from-navy-900 via-navy-800 to-navy-950 text-white shadow-xl relative overflow-hidden">
                 <div className="relative z-10 space-y-4">
@@ -270,11 +259,16 @@ export default function Predict() {
                   </div>
 
                   <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between text-xs sm:text-sm">
-                    <span className="text-slate-300">Expected Confidence Range:</span>
+                    <span className="text-slate-300">Estimated range (uncalibrated):</span>
                     <span className="font-bold text-gold-400">
                       {result.duration_range_months ? `${result.duration_range_months[0]} – ${result.duration_range_months[1]} months` : '± 3.5 mo'}
                     </span>
                   </div>
+                  {result.uncertainty?.notice && (
+                    <p className="text-[11px] leading-relaxed text-slate-300" role="note">
+                      {result.uncertainty.notice}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -286,12 +280,12 @@ export default function Predict() {
                   <div>
                     <h4 className="serif-heading font-bold text-base text-navy-950 dark:text-white">Classification Confidence</h4>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                      Model 1c (DRF) probability split:
+                      {result.model_trained ? 'Model 1c (DRF) probability split:' : 'Illustrative fallback risk estimate:'}
                     </p>
                     <div className="space-y-3 mt-4">
                       <div>
                         <div className="flex justify-between text-xs font-semibold mb-1">
-                          <span className="text-emerald-600 dark:text-emerald-400">On-Time Probability</span>
+                          <span className="text-emerald-600 dark:text-emerald-400">On-Time Estimate</span>
                           <span>{result.ontime_confidence_pct}%</span>
                         </div>
                         <div className="w-full bg-slate-100 dark:bg-navy-950 h-2 rounded-full overflow-hidden">
@@ -301,7 +295,7 @@ export default function Predict() {
 
                       <div>
                         <div className="flex justify-between text-xs font-semibold mb-1">
-                          <span className="text-rose-600 dark:text-rose-400">Delay Probability</span>
+                          <span className="text-rose-600 dark:text-rose-400">Delay-Risk Estimate</span>
                           <span>{result.delay_risk_pct}%</span>
                         </div>
                         <div className="w-full bg-slate-100 dark:bg-navy-950 h-2 rounded-full overflow-hidden">
@@ -312,13 +306,15 @@ export default function Predict() {
                   </div>
 
                   <div className="pt-4 border-t border-slate-100 dark:border-navy-800 text-[11px] text-slate-400">
-                    Threshold &ge; 85% routes to specialist; otherwise triggers consensus baseline.
+                    {result.model_trained
+                      ? 'Threshold ≥ 85% routes to a specialist; otherwise uses the baseline.'
+                      : 'Fallback risk values are benchmark estimates, not probabilities from a trained local classifier.'}
                   </div>
                 </div>
               </div>
 
               {/* SHAP Breakdown */}
-              <ShapBreakdown features={result.top_features} />
+              <ShapBreakdown features={result.top_features} modelTrained={result.model_trained} />
             </div>
           ) : (
             <div className="h-full min-h-[400px] flex flex-col items-center justify-center p-8 rounded-3xl border-2 border-dashed border-slate-200 dark:border-navy-800 text-center">

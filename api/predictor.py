@@ -55,20 +55,32 @@ class PredictorService:
     def predict(self, case_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Performs two-stage hybrid prediction or returns transparent benchmark state."""
         sec = str(case_dict.get("section_s", "379"))
-        bailable = str(case_dict.get("bailable_ipc", "bailable"))
 
         if self.classifier is None:
             # Model not trained locally yet: Return transparent state with published paper benchmarks
             # HARD RULE 4: Do not invent results. Clearly state model training status.
-            is_heavy = sec in {"302", "307", "376", "395", "420", "467"} or bailable == "non-bailable"
+            raw_bailability = case_dict.get("bailable_ipc", "bailable")
+            if isinstance(raw_bailability, bool):
+                is_bailable = raw_bailability
+            elif isinstance(raw_bailability, (int, float)):
+                is_bailable = raw_bailability == 1
+            else:
+                normalized_bailability = str(raw_bailability).strip().lower().replace("_", "-")
+                is_bailable = normalized_bailability in {"1", "true", "bailable"}
+
+            is_heavy = sec in {"302", "307", "376", "395", "420", "467"} or not is_bailable
             pred_class = "delayed" if is_heavy else "ontime"
             delay_risk = 78.5 if is_heavy else 38.2
             ontime_conf = round(100.0 - delay_risk, 1)
             dur = 38.4 if is_heavy else 16.2
             iqr = (24.0, 52.0) if is_heavy else (8.0, 22.0)
 
+            explanation_case = {
+                **case_dict,
+                "bailable_ipc": "bailable" if is_bailable else "non-bailable",
+            }
             plain_drivers = generate_plain_explanation(
-                case_dict,
+                explanation_case,
                 predicted_class=pred_class,
                 predicted_duration_months=dur,
                 model_trained=False,
@@ -88,6 +100,12 @@ class PredictorService:
                 "routed_regressor": "Model 2b (Delayed Specialist)" if is_heavy else "Model 2a (On-Time Specialist)",
                 "predicted_duration_months": dur,
                 "duration_range_months": list(iqr),
+                "uncertainty": {
+                    "type": "heuristic_range",
+                    "calibrated": False,
+                    "method": "Fixed research-benchmark range by fallback class",
+                    "notice": "This is an illustrative benchmark range, not a statistically calibrated prediction interval.",
+                },
                 "top_features": [
                     {
                         "feature": d.factor_name,
@@ -150,6 +168,12 @@ class PredictorService:
                 "routed_regressor": routed,
                 "predicted_duration_months": round(duration, 1),
                 "duration_range_months": [lower_bound, upper_bound],
+                "uncertainty": {
+                    "type": "heuristic_range",
+                    "calibrated": False,
+                    "method": "Fixed class-based spread around the model estimate",
+                    "notice": "This range is not calibrated; statistical coverage has not been measured on a held-out calibration set.",
+                },
                 "top_features": [
                     {
                         "feature": d.factor_name,
@@ -174,6 +198,7 @@ class PredictorService:
                 "routed_regressor": None,
                 "predicted_duration_months": None,
                 "duration_range_months": None,
+                "uncertainty": None,
                 "top_features": None,
                 "source": "Error during model execution",
             }

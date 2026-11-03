@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
@@ -20,12 +20,16 @@ from src.legal_knowledge.bail_rules import get_bail_assessment
 from src.retrieval.similar_cases import retrieve_similar_cases
 
 from .predictor import PredictorService
+from . import case_store
 from .schemas import (
+    AuthRequest,
+    CaseRecordCreate,
     CaseAnalysisRequest,
     CaseAnalysisResponse,
     CaseInput,
     CodebookItem,
     ModelInfoResponse,
+    OutcomeUpdate,
     PredictionResponse,
     TextExtractRequest,
 )
@@ -50,6 +54,71 @@ codebook = Codebook.get_instance()
 predictor_service = PredictorService.get_instance()
 extraction_engine = CaseExtractionEngine()
 entity_redactor = EntityRedactor()
+case_store.initialize_store()
+
+
+def _authenticated_user(authorization: Optional[str]) -> Dict[str, Any]:
+    scheme, _, token = (authorization or "").partition(" ")
+    return case_store.get_user_for_token(token if scheme.lower() == "bearer" else None)
+
+
+@app.post("/auth/register", tags=["Accounts"])
+def register_account(payload: AuthRequest):
+    return case_store.register(payload.email, payload.password)
+
+
+@app.post("/auth/login", tags=["Accounts"])
+def login_account(payload: AuthRequest):
+    return case_store.login(payload.email, payload.password)
+
+
+@app.get("/auth/me", tags=["Accounts"])
+def current_account(authorization: Optional[str] = Header(default=None)):
+    return _authenticated_user(authorization)
+
+
+@app.post("/auth/logout", tags=["Accounts"])
+def logout_account(authorization: Optional[str] = Header(default=None)):
+    scheme, _, token = (authorization or "").partition(" ")
+    case_store.logout(token if scheme.lower() == "bearer" else None)
+    return {"status": "signed_out"}
+
+
+@app.get("/cases", tags=["Case Evaluation"])
+def list_case_records(authorization: Optional[str] = Header(default=None)):
+    user = _authenticated_user(authorization)
+    return case_store.list_cases(user["id"])
+
+
+@app.post("/cases", tags=["Case Evaluation"])
+def create_case_record(payload: CaseRecordCreate, authorization: Optional[str] = Header(default=None)):
+    user = _authenticated_user(authorization)
+    return case_store.save_case(user["id"], payload.model_dump())
+
+
+@app.put("/cases/{case_id}/outcome", tags=["Case Evaluation"])
+def record_case_outcome(
+    case_id: str,
+    payload: OutcomeUpdate,
+    authorization: Optional[str] = Header(default=None),
+):
+    user = _authenticated_user(authorization)
+    return case_store.update_outcome(user["id"], case_id, payload.model_dump())
+
+
+@app.delete("/cases/{case_id}", tags=["Case Evaluation"])
+def remove_case_record(case_id: str, authorization: Optional[str] = Header(default=None)):
+    user = _authenticated_user(authorization)
+    case_store.delete_case(user["id"], case_id)
+    return {"status": "deleted"}
+
+
+@app.get("/cases/evaluation", tags=["Case Evaluation"])
+def case_evaluation_summary(authorization: Optional[str] = Header(default=None)):
+    user = _authenticated_user(authorization)
+    records = case_store.list_cases(user["id"])
+    threshold = float(config.get("hybrid_benchmark", {}).get("threshold_months", 24))
+    return case_store.summarize_evaluation(records, threshold_months=threshold)
 
 
 @app.get("/", response_class=HTMLResponse, tags=["Web UI"])
@@ -266,6 +335,7 @@ def analyze_case(req: CaseAnalysisRequest):
         "ontime_confidence_pct": pred_res.get("ontime_confidence_pct", 50.0),
         "expected_duration_months": pred_res.get("predicted_duration_months", 24.0),
         "duration_range_months": pred_res.get("duration_range_months", [12.0, 36.0]),
+        "uncertainty": pred_res.get("uncertainty"),
         "routed_regressor": pred_res.get("routed_regressor", "Model 2 Baseline"),
         "model_trained": pred_res.get("model_trained", False),
         "note": pred_res.get("message", "Predicted via two-stage hybrid architecture."),

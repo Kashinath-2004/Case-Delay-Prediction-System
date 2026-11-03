@@ -27,3 +27,50 @@
   @apply bg-slate-400 dark:bg-navy-600;
 }
 
+@page {
+  size: A4;
+  margin: 14mm;
+}
+
+@media print {
+  html,
+  body,
+  #root {
+    background: #fff !important;
+    color: #111827 !important;
+  }
+
+  nav,
+  footer,
+  [data-print-hide="true"] {
+    display: none !important;
+  }
+
+  .case-report {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    color: #111827 !important;
+    font-size: 10pt;
+  }
+
+  .case-report > div {
+    break-inside: avoid;
+    border-color: #cbd5e1 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+
+  .case-report [class*="bg-"] {
+    background: #fff !important;
+  }
+
+  .case-report [class*="text-"] {
+    color: #111827 !important;
+  }
+
+  .case-report [class*="border-"] {
+    border-color: #cbd5e1 !important;
+  }
+}
+
